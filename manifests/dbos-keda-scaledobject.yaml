@@ -1,0 +1,16 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dbos-app-scaledobject
+spec:
+  scaleTargetRef:
+    name: dbos-app
+  minReplicaCount: 1
+  maxReplicaCount: 100  # Adjust as needed
+  triggers:
+  - type: metrics-api
+    metadata:
+      url: http://dbos-app.default.svc.cluster.local:8000/metrics
+      valueLocation: expected_pods
+      targetValue: "1"
+
