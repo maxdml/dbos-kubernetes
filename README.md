@@ -149,6 +149,8 @@ The endpoint:
 4. Compute the load ratio for each queue
 5. Return the maximum load ratio
 
+[ Show code here ]
+
 
 ## Try it
 
