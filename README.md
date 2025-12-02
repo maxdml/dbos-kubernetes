@@ -6,6 +6,12 @@ Queues are the prime mechanism to control load in a DBOS application. For exampl
 
 In this tutorial, we walk you through configuring KEDA on Kubernetes to scale pods based on DBOS queue utilization, using the metric API.
 
+## The application
+
+For this tutorial we'll use an application with a single queues with a worker concurrency set. The application will expose an endpoint which will enqueue a single workflow, set to sleep for a configurable duration.
+
+The code snippets will be in Golang but the concept works across all DBOS SDKs.
+
 ## Setup
 
 This tutorial assume you already have a Kubernetes cluster deployed. You'll need a Postgres instance to backup your application.
@@ -108,8 +114,6 @@ spec:
       targetPort: 8000
 ```
 
-[ PLACE HOLDER]: describe the application (registered queue, endpoints)
-
 ### Configure a KEDA scaled object
 
 Now we will instruct KEDA to scale our application's pods based on a queue utilization metric exposed by the application itself. Update this manifest with your service URL.
@@ -148,11 +152,11 @@ The endpoint:
 
 ## Try it
 
-Using the demo app ...
+Using the endpoint in the application, enqueue a number of workflows that exceeds the concurrency limit, for example:
 
 ```bash
 # Enqueue 10 workflows that sleep for 30 seconds each
-for i in {1..10}; do curl -s http://YOUR_LOAD_BALANCER:8000/enqueue/30 & done; wait
+for i in {1..10}; do curl -s http://YOUR_LOAD_BALANCER:8000/enqueue/30 & done;
 ```
 
 Watch the pods scale up:
