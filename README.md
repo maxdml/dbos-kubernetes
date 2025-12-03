@@ -8,9 +8,9 @@ In this tutorial, we walk you through configuring KEDA on Kubernetes to scale po
 
 For this tutorial we'll use a single queue with worker concurrency limits. The application will expose an endpoint which will enqueue a single workflow, set to sleep for a configurable duration.
 
-The code snippets will be in Golang but the concept works across all DBOS SDKs. This repository runs the example and has utility scripts assuming as much.
+This sample application uses Transact Golang and is applicable to all DBOS SDKs and KEDA-able Kubernetes clusters.
 
-<details><summary><strong>Configuration</strong></summary>
+<details><summary><strong>Configuration for EKS deployment</strong></summary>
 
 Before deploying, you need to configure environment-specific values:
 
@@ -50,7 +50,7 @@ Before deploying, you need to configure environment-specific values:
 
 ## Setup
 
-This tutorial assume you already have a Kubernetes cluster deployed. You'll need a Postgres instance to backup your application.
+This section assumes you already have a Kubernetes cluster deployed. You'll need a Postgres instance to backup your application.
 <details><summary><strong>Sample Postgres manifest</strong></summary>
 
 ```yaml
@@ -169,7 +169,7 @@ spec:
 
 ### Configure a KEDA scaled object
 
-Now we will instruct KEDA to scale our application's pods based on a queue utilization metric exposed by the application itself. The KEDA ScaledObject manifest is generated from templates and will automatically use your configured namespace and app name.
+Now let's instruct KEDA to scale our application's pods based on a queue utilization metric exposed by the application itself.
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
@@ -184,79 +184,33 @@ spec:
   triggers:
   - type: metrics-api
     metadata:
-      url: http://dbos-app.default.svc.cluster.local:8000/metrics/queueName
+      url: http://dbos-app.default.svc.cluster.local:8000/metrics/queueName # `queueName` must match the name under which the DBOS queue was registered
       valueLocation: queue_length
       targetValue: "2"  # Set to your worker concurrency value
 ```
 
-The `valueLocation` field represents a JSON field in the /metrics endpoint response, where we expect the metric's value to reside. `targetValue: "2"` means we want to scale when the queue length exceeds 2 times the worker concurrency (in this example, worker concurrency is 2, so we scale when queue length > 4).
+The `valueLocation` field represents a JSON field in the `/metrics` endpoint response.
+`targetValue: "2"` means we want a number of worker equal to the queue length divided by 2 (in this example, the queue's worker concurrency is 2). Specifically: `desiredReplicas = queue_length / targetValue`
 
 ## The metrics endpoint
 
-The endpoints we registered with the KEDA scaler returns the number of workers needed to handle the busiest queue's load. You can of course change this logic for any metric of your choice (e.g., target a specific queue, or sum across all queues.)
+The endpoint we registered with the KEDA scaler returns the current size of the specified queue (which is made of all `PENDING` and `ENQUEUED` DBOS workflows on the queue.)
 
 ```golang
 type MetricsResponse struct {
-	ExpectedPods int `json:"expected_pods"`
+	QueueLength int `json:"queue_length"`
 }
 
-r.GET("/metrics", func(c *gin.Context) {
-    expectedPods, err := computeExpectedPods(dbosContext)
-    if err != nil {
-        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error computing metrics: %v", err)})
-        return
-    }
-    c.JSON(http.StatusOK, MetricsResponse{ExpectedPods: expectedPods})
-})
-
-```
-### Finding the busiest queue's scaling factor
-
-```golang
-func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
-	// Get queue metadata from admin server
-	// Filter queues that have worker concurrency > 0
-	queuesWithConcurrency := make(map[string]int)
-	for _, queue := range ctx.ListRegisteredQueues {
-		if queue.WorkerConcurrency > 0 {
-			queuesWithConcurrency[queue.Name] = queue.WorkerConcurrency
-		}
-	}
-
-	if len(queuesWithConcurrency) == 0 {
-		return 1, nil // Default to 1 pod if no queues with concurrency
-	}
-
-	// Get all workflows that are in enqueued/pending in any queue
-	allWorkflows, err := dbos.ListWorkflows(ctx, dbos.WithQueuesOnly())
+r.GET("/metrics/:queueName", func(c *gin.Context) {
+	queueName := c.Param("queueName")
+	workflows, err := dbos.ListWorkflows(dbosContext, dbos.WithQueuesOnly(), dbos.WithQueueName(queueName))
 	if err != nil {
-		return 0, fmt.Errorf("failed to list workflows: %w", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error computing metrics: %v", err)})
+		return
 	}
 
-	// Build a map of queue name to workflow count in a single pass
-	queueWorkflowCounts := make(map[string]int)
-	for _, workflow := range allWorkflows {
-		queueWorkflowCounts[workflow.QueueName]++
-	}
-
-	// Compute max expected pods across all queues with worker concurrency
-	maxExpectedPods := 0
-	for queueName, workerConcurrency := range queuesWithConcurrency {
-		queueLength := queueWorkflowCounts[queueName]
-		// Compute expected pods for this queue: ceil((enqueued + pending) / worker_concurrency)
-		expectedPods := int(math.Ceil(float64(queueLength) / float64(workerConcurrency)))
-		if expectedPods > maxExpectedPods {
-			maxExpectedPods = expectedPods
-		}
-	}
-
-	// Ensure at least 1 pod
-	if maxExpectedPods < 1 {
-		maxExpectedPods = 1
-	}
-
-	return maxExpectedPods, nil
-}
+	c.JSON(http.StatusOK, MetricsResponse{QueueLength: len(workflows)})
+})
 ```
 
 ## Try it
