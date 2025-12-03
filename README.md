@@ -220,6 +220,4 @@ Watch the pods scale up:
 watch -n 1 kubectl get pods -l app=dbos-app
 ```
 
-You should see the number of pods increase as KEDA detects the queue backlog. With `worker_concurrency=1` and 10 enqueued workflows, you should see up to 10 pods.
-
-Pods will eventually scale down (per KEDA configuration)
+You should see the number of pods increase as KEDA detects the queue backlog. With `workerConcurrency: 1` and 10 enqueued workflows, you should see up to 10 pods.
