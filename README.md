@@ -138,17 +138,9 @@ The `valueLocation` field represents a JSON field in the /metrics endpoint respo
 
 ## The metrics endpoint
 
-We will now program an endpoint in the application that returns the number of workers needed to handle the busiest queue's load. You can of course change this logic for any metric of your choice (e.g., target a specific queue, or sum across all queues.)
+The endpoints we registered with the KEDA scaler returns the number of workers needed to handle the busiest queue's load. You can of course change this logic for any metric of your choice (e.g., target a specific queue, or sum across all queues.)
 
-The endpoint:
-1. Access the DBOS Context queue registry to list all the registered queues
-2. Retain queues that have an explicit "worker concurrency" property
-3. List all queue workflows
-4. Compute the load ratio for each queue
-5. Return the maximum load ratio
-
-[ Show code here ]
-
+### Determine the busiest queue's scaling factor
 
 ```golang
 func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
@@ -196,7 +188,6 @@ func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
 	return maxExpectedPods, nil
 }
 ```
-
 
 ## Try it
 
