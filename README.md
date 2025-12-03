@@ -1,14 +1,12 @@
 # Autoscale a DBOS application on Kubernetes with KEDA
 
-Queues are the prime mechanism to control load in a DBOS application. For example you can set a per-worker concurrency cap on a DBOS queue, controlling how many tasks a single worker can dequeue. You can estimate how many workers are required at any given time to handle a queue's tasks with:
-
-**number of items in the queue / per worker concurrency**
+Queues are the prime mechanism to control load in a DBOS application. For example you can set a per-worker concurrency cap on a DBOS queue, controlling how many tasks a single worker can dequeue. You can then estimate how many workers are required at any given time to handle a queue's tasks by dividing the number of tasks in the queue by the worker concurrency limit.
 
 In this tutorial, we walk you through configuring KEDA on Kubernetes to scale pods based on DBOS queue utilization, using the metric API.
 
 ## The application
 
-For this tutorial we'll use an application with a single queues with a worker concurrency set. The application will expose an endpoint which will enqueue a single workflow, set to sleep for a configurable duration.
+For this tutorial we'll use a single queue with worker concurrency limits. The application will expose an endpoint which will enqueue a single workflow, set to sleep for a configurable duration.
 
 The code snippets will be in Golang but the concept works across all DBOS SDKs.
 
@@ -150,6 +148,54 @@ The endpoint:
 5. Return the maximum load ratio
 
 [ Show code here ]
+
+
+```golang
+func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
+	// Get queue metadata from admin server
+	// Filter queues that have worker concurrency > 0
+	queuesWithConcurrency := make(map[string]int)
+	for _, queue := range ctx.ListRegisteredQueues {
+		if queue.WorkerConcurrency > 0 {
+			queuesWithConcurrency[queue.Name] = queue.WorkerConcurrency
+		}
+	}
+
+	if len(queuesWithConcurrency) == 0 {
+		return 1, nil // Default to 1 pod if no queues with concurrency
+	}
+
+	// Get all workflows that are in enqueued/pending in any queue
+	allWorkflows, err := dbos.ListWorkflows(ctx, dbos.WithQueuesOnly())
+	if err != nil {
+		return 0, fmt.Errorf("failed to list workflows: %w", err)
+	}
+
+	// Build a map of queue name to workflow count in a single pass
+	queueWorkflowCounts := make(map[string]int)
+	for _, workflow := range allWorkflows {
+		queueWorkflowCounts[workflow.QueueName]++
+	}
+
+	// Compute max expected pods across all queues with worker concurrency
+	maxExpectedPods := 0
+	for queueName, workerConcurrency := range queuesWithConcurrency {
+		queueLength := queueWorkflowCounts[queueName]
+		// Compute expected pods for this queue: ceil((enqueued + pending) / worker_concurrency)
+		expectedPods := int(math.Ceil(float64(queueLength) / float64(workerConcurrency)))
+		if expectedPods > maxExpectedPods {
+			maxExpectedPods = expectedPods
+		}
+	}
+
+	// Ensure at least 1 pod
+	if maxExpectedPods < 1 {
+		maxExpectedPods = 1
+	}
+
+	return maxExpectedPods, nil
+}
+```
 
 
 ## Try it
