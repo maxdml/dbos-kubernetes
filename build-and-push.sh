@@ -1,13 +1,16 @@
 #!/bin/bash
 
-# Configuration
-# Update these values with your ECR repository details
-ECR_REPO="YOUR_ACCOUNT.dkr.ecr.YOUR_REGION.amazonaws.com/YOUR_REPO"
-IMAGE_NAME="kubernetes-integration"
-AWS_REGION="YOUR_REGION"
+# Source environment variables
+if [ ! -f .env.sh ]; then
+    echo "Error: .env.sh file not found!"
+    echo "Please copy .env.sh.example to .env.sh and update it with your values."
+    exit 1
+fi
 
-# Get the image tag (default to latest if not provided)
-TAG=${1:-latest}
+source .env.sh
+
+# Get the image tag (default to IMAGE_TAG from .env.sh if not provided)
+TAG=${1:-${IMAGE_TAG}}
 FULL_IMAGE_NAME="${ECR_REPO}:${IMAGE_NAME}-${TAG}"
 
 echo "Building Docker image..."

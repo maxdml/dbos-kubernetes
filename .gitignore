@@ -1,1 +1,3 @@
 main
+.env.sh
+manifests/generated/

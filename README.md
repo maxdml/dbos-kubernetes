@@ -8,7 +8,45 @@ In this tutorial, we walk you through configuring KEDA on Kubernetes to scale po
 
 For this tutorial we'll use a single queue with worker concurrency limits. The application will expose an endpoint which will enqueue a single workflow, set to sleep for a configurable duration.
 
-The code snippets will be in Golang but the concept works across all DBOS SDKs.
+The code snippets will be in Golang but the concept works across all DBOS SDKs. This repository runs the example and has utility scripts assuming as much.
+
+<details><summary><strong>Configuration</strong></summary>
+
+Before deploying, you need to configure environment-specific values:
+
+1. Copy the example environment file:
+   ```bash
+   cp .env.sh.example .env.sh
+   ```
+
+2. Edit `.env.sh` and update the following values:
+   - **ECR_REPO**: Your AWS ECR repository URL (e.g., `ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/REPO_NAME`)
+   - **AWS_REGION**: Your AWS region (e.g., `us-east-1`)
+   - **AWS_LB_SUBNETS**: Comma-separated list of subnet IDs for your AWS Load Balancer
+   - **POSTGRES_PASSWORD**: A secure password for PostgreSQL
+   - **KUBERNETES_NAMESPACE**: The Kubernetes namespace where you'll deploy (default: `default`)
+   - **DBOS_APP_NAME**: The name for your DBOS application (default: `dbos-app`)
+
+   The `.env.sh` file is gitignored and will not be committed to the repository.
+
+3. Generate Kubernetes manifests from templates:
+   ```bash
+   ./deploy.sh
+   ```
+
+   This will create generated manifests in `manifests/generated/` directory.
+
+4. To deploy to your cluster:
+   ```bash
+   ./deploy.sh --apply
+   ```
+
+   Or apply manually:
+   ```bash
+   kubectl apply -f manifests/generated/
+   ```
+
+</details>
 
 ## Setup
 
@@ -71,9 +109,21 @@ kubectl get pods -n keda
 
 You should see KEDA operator and metrics server pods running.
 
+### Build and Push Docker Image
+
+Build and push your Docker image to ECR:
+
+```bash
+./build-and-push.sh [tag]
+```
+
+If no tag is provided, it will use the `IMAGE_TAG` value from `.env.sh` (default: `latest`).
+
 ### Deploy a DBOS application
 
-Update this manifest with your specific values. Note that your load balancer configuration may vary based on your Kubernetes setup.
+The deployment manifests are generated from templates using the values in your `.env.sh` file. See the [Configuration](#configuration) section above for setup instructions.
+
+<details><summary><strong>Sample DBOS application manifest</strong></summary>
 
 ```yaml
 apiVersion: apps/v1
@@ -92,10 +142,10 @@ spec:
     spec:
       containers:
         - name: dbos-app
-          image: YOUR_IMAGE_NAME
+          image: YOUR_ECR_REPO:kubernetes-integration-latest
           env:
             - name: DBOS_SYSTEM_DATABASE_URL
-              value: postgres://postgres:dbos@postgres:5432/kube
+              value: postgres://postgres:YOUR_PASSWORD@postgres:5432/kube
           ports:
             - containerPort: 8000
 ---
@@ -103,6 +153,9 @@ apiVersion: v1
 kind: Service
 metadata:
   name: dbos-app
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-xxx,subnet-yyy,subnet-zzz"
 spec:
   type: LoadBalancer
   selector:
@@ -112,9 +165,11 @@ spec:
       targetPort: 8000
 ```
 
+</details>
+
 ### Configure a KEDA scaled object
 
-Now we will instruct KEDA to scale our application's pods based on a queue utilization metric exposed by the application itself. Update this manifest with your service URL.
+Now we will instruct KEDA to scale our application's pods based on a queue utilization metric exposed by the application itself. The KEDA ScaledObject manifest is generated from templates and will automatically use your configured namespace and app name.
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
@@ -125,16 +180,16 @@ spec:
   scaleTargetRef:
     name: dbos-app
   minReplicaCount: 1
-  maxReplicaCount: 100
+  maxReplicaCount: 100  # Adjust as needed
   triggers:
   - type: metrics-api
     metadata:
-      url: http://dbos-app.default.svc.cluster.local:8000/metrics
-      valueLocation: expected_pods
-      targetValue: "1"
+      url: http://dbos-app.default.svc.cluster.local:8000/metrics/queueName
+      valueLocation: queue_length
+      targetValue: "2"  # Set to your worker concurrency value
 ```
 
-The `valueLocation` field represents a JSON field in the /metrics endpoint response, where we expect the metric's value to reside. `targetValue: "1"` means we map 1:1 the metric's value to the desired pods number. 
+The `valueLocation` field represents a JSON field in the /metrics endpoint response, where we expect the metric's value to reside. `targetValue: "2"` means we want to scale when the queue length exceeds 2 times the worker concurrency (in this example, worker concurrency is 2, so we scale when queue length > 4).
 
 ## The metrics endpoint
 
@@ -206,9 +261,16 @@ func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
 
 ## Try it
 
-Using the endpoint in the application, enqueue a number of workflows that exceeds the concurrency limit, for example:
+First, get your Load Balancer URL:
 
 ```bash
+kubectl get service dbos-app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+```
+
+Then, using the endpoint in the application, enqueue a number of workflows that exceeds the concurrency limit, for example:
+
+```bash
+# Replace YOUR_LOAD_BALANCER with the hostname from above
 # Enqueue 10 workflows that sleep for 30 seconds each
 for i in {1..10}; do curl -s http://YOUR_LOAD_BALANCER:8000/enqueue/30 & done;
 ```
