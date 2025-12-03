@@ -10,7 +10,7 @@ spec:
   triggers:
   - type: metrics-api
     metadata:
-      url: http://dbos-app.default.svc.cluster.local:8000/metrics
-      valueLocation: expected_pods
-      targetValue: "1"
+      url: http://dbos-app.default.svc.cluster.local:8000/metrics/queueName
+      valueLocation: queue_length
+      targetValue: "2"  # Set to your worker concurrency value
 
