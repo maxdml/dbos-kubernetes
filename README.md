@@ -140,7 +140,22 @@ The `valueLocation` field represents a JSON field in the /metrics endpoint respo
 
 The endpoints we registered with the KEDA scaler returns the number of workers needed to handle the busiest queue's load. You can of course change this logic for any metric of your choice (e.g., target a specific queue, or sum across all queues.)
 
-### Determine the busiest queue's scaling factor
+```golang
+type MetricsResponse struct {
+	ExpectedPods int `json:"expected_pods"`
+}
+
+r.GET("/metrics", func(c *gin.Context) {
+    expectedPods, err := computeExpectedPods(dbosContext)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Error computing metrics: %v", err)})
+        return
+    }
+    c.JSON(http.StatusOK, MetricsResponse{ExpectedPods: expectedPods})
+})
+
+```
+### Finding the busiest queue's scaling factor
 
 ```golang
 func computeExpectedWorkers(ctx dbos.DBOSContext) (int, error) {
